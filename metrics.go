@@ -193,5 +193,5 @@ func main() {
 
     http.Handle("/metrics", promhttp.Handler())
     fmt.Println("Serving metrics at /metrics")
-    http.ListenAndServe(":8080", nil)
+    http.ListenAndServe(":9060", nil)
 }
