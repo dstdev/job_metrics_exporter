@@ -1,178 +1,197 @@
 package main
 
 import (
-	"bufio"
-	"encoding/csv"
-	"fmt"
-	"os"
-	"os/exec"
-	"path/filepath"
-	"strings"
+    "fmt"
+    "io/ioutil"
+    "net/http"
+    "os"
+    "os/exec"
+    "strconv"
+    "strings"
+    "time"
+
+    "github.com/prometheus/client_golang/prometheus"
+    "github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
-func getCgroupPidToJob() (map[string]string, error) {
-	pidToJob := make(map[string]string)
+var (
+    gpuUtilizationMetric = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+        Name: "gpu_utilization",
+        Help: "GPU utilization percentage.",
+    }, []string{"gpu_id", "job_id"})
 
-	err := filepath.Walk("/sys/fs/cgroup", func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
+    gpuMemoryUsageMetric = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+        Name: "gpu_memory_usage_bytes",
+        Help: "GPU memory usage in bytes.",
+    }, []string{"gpu_id", "job_id"})
 
-		if info.IsDir() || info.Name() != "cgroup.procs" {
-			return nil
-		}
+    ioReadBytesMetric = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+        Name: "io_read_bytes",
+        Help: "IO read bytes.",
+    }, []string{"pid", "job_id"})
 
-		file, err := os.Open(path)
-		if err != nil {
-			return err
-		}
-		defer file.Close()
+    ioWriteBytesMetric = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+        Name: "io_write_bytes",
+        Help: "IO write bytes.",
+    }, []string{"pid", "job_id"})
+)
 
-		scanner := bufio.NewScanner(file)
-		for scanner.Scan() {
-			pid := scanner.Text()
-			jobID := filepath.Base(filepath.Dir(path))
-			pidToJob[pid] = jobID
-		}
-
-		return scanner.Err()
-	})
-
-	return pidToJob, err
+func init() {
+    // Register the custom metrics with Prometheus's default registry
+    prometheus.MustRegister(gpuUtilizationMetric)
+    prometheus.MustRegister(gpuMemoryUsageMetric)
+    prometheus.MustRegister(ioReadBytesMetric)
+    prometheus.MustRegister(ioWriteBytesMetric)
 }
 
-func getNvidiaMetrics() (map[string]map[string]string, error) {
-	metrics := make(map[string]map[string]string)
 
-	computeAppsCmd := "nvidia-smi --query-compute-apps=pid,used_gpu_memory,gpu_name,gpu_uuid --format=csv"
-	gpuUsageCmd := "nvidia-smi --query-gpu=gpu_uuid,name,utilization.gpu --format=csv"
-
-	// Function to run a command and return its output
-	runCmd := func(cmd string) ([]byte, error) {
-		return exec.Command("bash", "-c", cmd).Output()
-	}
-
-	// Run the computeAppsCmd and parse the output
-	computeAppsOutput, err := runCmd(computeAppsCmd)
+func getJobIDFromPID(pid string) (string, error) {
+	path := fmt.Sprintf("/proc/%s/cgroup", pid)
+	file, err := os.Open(path)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
+	defer file.Close()
 
-	reader := csv.NewReader(strings.NewReader(string(computeAppsOutput)))
-	computeAppsRecords, err := reader.ReadAll()
-	if err != nil {
-		return nil, err
-	}
-
-	// Skip header and iterate over records
-	for _, record := range computeAppsRecords[1:] {
-		pid := record[0]
-		metrics[pid] = map[string]string{
-			"gpu_memory_usage": record[1],
-			"gpu_name":         record[2],
-			"gpu_uuid":         record[3],
-			"gpu_utilization":  "N/A", // Default value, to be updated later
-		}
-	}
-
-	// Run the gpuUsageCmd and parse the output
-	gpuUsageOutput, err := runCmd(gpuUsageCmd)
-	if err != nil {
-		return nil, err
-	}
-
-	reader = csv.NewReader(strings.NewReader(string(gpuUsageOutput)))
-	gpuUsageRecords, err := reader.ReadAll()
-	if err != nil {
-		return nil, err
-	}
-
-	// Skip header and iterate over records to match GPU UUIDs
-	for _, record := range gpuUsageRecords[1:] {
-		gpuUuid := record[0]
-		gpuUtilization := record[2]
-
-		for pid, metric := range metrics {
-			if metric["gpu_uuid"] == gpuUuid {
-				metrics[pid]["gpu_utilization"] = gpuUtilization
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if strings.Contains(line, "slurm") && strings.Contains(line, "job_") {
+			// Extract job ID from the line
+			parts := strings.Split(line, "job_")
+			if len(parts) > 1 {
+				jobID := strings.Split(parts[1], "/")[0]
+				return jobID, nil
 			}
 		}
 	}
 
-	return metrics, nil
-}
-
-func getIOMetrics(pidToJob map[string]string) (map[string]map[string]string, error) {
-	ioMetrics := make(map[string]map[string]string)
-
-	for pid := range pidToJob {
-		ioData, err := readProcIO(pid)
-		if err != nil {
-			// If there's an error reading a particular PID, you might choose to log it and continue
-			// fmt.Printf("Error reading IO for PID %s: %v\n", pid, err)
-			continue
-		}
-		ioMetrics[pid] = ioData
-	}
-
-	return ioMetrics, nil
-}
-
-// readProcIO reads and parses the IO data from /proc/[pid]/io
-func readProcIO(pid string) (map[string]string, error) {
-	path := fmt.Sprintf("/proc/%s/io", pid)
-	file, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer file.Close()
-
-	ioData := make(map[string]string)
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		line := scanner.Text()
-		parts := strings.SplitN(line, ":", 2)
-		if len(parts) != 2 {
-			continue
-		}
-		key := strings.TrimSpace(parts[0])
-		value := strings.TrimSpace(parts[1])
-		ioData[key] = value
-	}
-
 	if err := scanner.Err(); err != nil {
-		return nil, err
+		return "", err
 	}
 
-	return ioData, nil
+	return "", fmt.Errorf("job ID not found for PID %s", pid)
 }
 
-func writeMetricsToFile(metrics map[string]map[string]string) error {
-	// Open a file and write metrics
-	// ...
-	return nil
+func collectGPUMetrics() {
+	// Run nvidia-smi to get GPU usage and application memory usage
+	gpuInfoCmd := exec.Command("bash", "-c", "nvidia-smi --query-gpu=gpu_uuid,index,name,utilization.gpu --format=csv,noheader")
+	gpuInfoOutput, err := gpuInfoCmd.Output()
+	if err != nil {
+		fmt.Printf("Failed to execute command: %s\n", err)
+		return
+	}
+
+	computeAppsCmd := exec.Command("bash", "-c", "nvidia-smi --query-compute-apps=pid,used_gpu_memory,gpu_uuid --format=csv,noheader")
+	computeAppsOutput, err := computeAppsCmd.Output()
+	if err != nil {
+		fmt.Printf("Failed to execute command: %s\n", err)
+		return
+	}
+
+	// Process gpuInfoOutput to map UUID to GPU ID
+	gpuInfoLines := strings.Split(strings.TrimSpace(string(gpuInfoOutput)), "\n")
+	gpuUUIDToIndex := make(map[string]string)
+	for _, line := range gpuInfoLines {
+		parts := strings.Split(line, ", ")
+		if len(parts) == 4 {
+			uuid := parts[0]
+			index := parts[1]
+			gpuUUIDToIndex[uuid] = index
+		}
+	}
+
+	// Process computeAppsOutput and update Prometheus metrics
+	computeAppsLines := strings.Split(strings.TrimSpace(string(computeAppsOutput)), "\n")
+	for _, line := range computeAppsLines {
+        parts := strings.Split(line, ", ")
+        if len(parts) == 3 {
+            pid := parts[0]
+            usedMemory, err := strconv.ParseFloat(strings.Trim(parts[1], " MiB"), 64)
+            if err != nil {
+                fmt.Printf("Error parsing used GPU memory for PID %s: %v\n", pid, err)
+                continue
+            }
+            uuid := parts[2]
+
+            if index, exists := gpuUUIDToIndex[uuid]; exists {
+                jobID, err := getJobIDFromPID(pid)
+                if err != nil {
+                    fmt.Printf("Error fetching job ID for PID %s: %v\n", pid, err)
+                    continue
+                }
+
+                gpuMemoryUsageMetric.With(prometheus.Labels{"gpu_id": index, "job_id": jobID}).Set(usedMemory * 1024 * 1024) // Convert MiB to bytes
+                // Note: You should update gpuUtilizationMetric similarly if you have that data available.
+            }
+        }
+    }
 }
+
+func collectIOMetrics() {
+	// Iterate over PIDs and collect IO metrics
+	procDir, err := os.Open("/proc")
+	if err != nil {
+		fmt.Printf("Failed to open /proc: %s\n", err)
+		return
+	}
+	defer procDir.Close()
+
+	pids, err := procDir.Readdirnames(-1)
+	if err != nil {
+		fmt.Printf("Failed to read /proc: %s\n", err)
+		return
+	}
+
+	for _, pid := range pids {
+	        if _, err := strconv.Atoi(pid); err == nil {
+	            jobID, err := getJobIDFromPID(pid)
+	            if err != nil {
+	                fmt.Printf("Error fetching job ID for PID %s: %v\n", pid, err)
+	                continue
+	            }
+	
+	            ioFilePath := fmt.Sprintf("/proc/%s/io", pid)
+	            content, err := os.ReadFile(ioFilePath)
+	            if err != nil {
+	                fmt.Printf("Error reading IO file for PID %s: %v\n", pid, err)
+	                continue
+	            }
+	
+	            for _, line := range strings.Split(string(content), "\n") {
+	                parts := strings.Split(line, ":")
+	                if len(parts) == 2 {
+	                    key := strings.TrimSpace(parts[0])
+	                    value, err := strconv.ParseFloat(strings.TrimSpace(parts[1]), 64)
+	                    if err != nil {
+	                        fmt.Printf("Error parsing IO metric for PID %s: %v\n", pid, err)
+	                        continue
+	                    }
+	
+	                    if key == "read_bytes" {
+	                        ioReadBytesMetric.With(prometheus.Labels{"pid": pid, "job_id": jobID}).Set(value)
+	                    } else if key == "write_bytes" {
+	                        ioWriteBytesMetric.With(prometheus.Labels{"pid": pid, "job_id": jobID}).Set(value)
+	                    }
+	                }
+	            }
+	        }
+	    }
+	}
 
 func main() {
-	pidToJob, err := getCgroupPidToJob()
-	if err != nil {
-		fmt.Println("Error getting cgroup PID to Job mapping:", err)
-		return
-	}
+    go func() {
+        ticker := time.NewTicker(10 * time.Second)
+        for {
+            select {
+            case <-ticker.C:
+                collectGPUMetrics()
+                collectIOMetrics()
+            }
+        }
+    }()
 
-	nvidiaMetrics, err := getNvidiaMetrics()
-	if err != nil {
-		fmt.Println("Error getting NVIDIA metrics:", err)
-		return
-	}
-
-	ioMetrics, err := getIOMetrics(pidToJob)
-	if err != nil {
-		fmt.Println("Error getting IO metrics:", err)
-		return
-	}
-
-	if err := writeMetricsToFile(nvidiaMetrics); err != nil {
-		fmt.Println("Error writing metrics to file:", err)
-	}
+    http.Handle("/metrics", promhttp.Handler())
+    fmt.Println("Serving metrics at /metrics")
+    http.ListenAndServe(":8080", nil)
 }
