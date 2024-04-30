@@ -1,7 +1,8 @@
 name: build
 on:
-  push: branches
-    - production
+  push:
+    branches:
+      - production
 permissions:
   contents: write
   packages: write
