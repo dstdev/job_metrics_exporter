@@ -1,8 +1,8 @@
 package main
 
 import (
+    "bufio"
     "fmt"
-    "io/ioutil"
     "net/http"
     "os"
     "os/exec"
