@@ -1,6 +1,6 @@
 name: build
 on:
-  push: branches:
+  push: branches
     - production
 permissions:
   contents: write
