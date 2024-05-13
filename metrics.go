@@ -1,49 +1,48 @@
 package main
 
 import (
-    "bufio"
-    "fmt"
-    "net/http"
-    "os"
-    "os/exec"
-    "strconv"
-    "strings"
-    "time"
+	"bufio"
+	"fmt"
+	"net/http"
+	"os"
+	"os/exec"
+	"strconv"
+	"strings"
+	"time"
 
-    "github.com/prometheus/client_golang/prometheus"
-    "github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 var (
-    gpuUtilizationMetric = prometheus.NewGaugeVec(prometheus.GaugeOpts{
-        Name: "gpu_utilization",
-        Help: "GPU utilization percentage.",
-    }, []string{"gpu_id", "job_id"})
+	gpuUtilizationMetric = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "gpu_utilization",
+		Help: "GPU utilization percentage.",
+	}, []string{"gpu_id", "job_id"})
 
-    gpuMemoryUsageMetric = prometheus.NewGaugeVec(prometheus.GaugeOpts{
-        Name: "gpu_memory_usage_bytes",
-        Help: "GPU memory usage in bytes.",
-    }, []string{"gpu_id", "job_id"})
+	gpuMemoryUsageMetric = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "gpu_memory_usage_bytes",
+		Help: "GPU memory usage in bytes.",
+	}, []string{"gpu_id", "job_id"})
 
-    ioReadBytesMetric = prometheus.NewGaugeVec(prometheus.GaugeOpts{
-        Name: "io_read_bytes",
-        Help: "IO read bytes.",
-    }, []string{"pid", "job_id"})
+	ioReadBytesMetric = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "io_read_bytes",
+		Help: "IO read bytes.",
+	}, []string{"pid", "job_id"})
 
-    ioWriteBytesMetric = prometheus.NewGaugeVec(prometheus.GaugeOpts{
-        Name: "io_write_bytes",
-        Help: "IO write bytes.",
-    }, []string{"pid", "job_id"})
+	ioWriteBytesMetric = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "io_write_bytes",
+		Help: "IO write bytes.",
+	}, []string{"pid", "job_id"})
 )
 
 func init() {
-    // Register the custom metrics with Prometheus's default registry
-    prometheus.MustRegister(gpuUtilizationMetric)
-    prometheus.MustRegister(gpuMemoryUsageMetric)
-    prometheus.MustRegister(ioReadBytesMetric)
-    prometheus.MustRegister(ioWriteBytesMetric)
+	// Register the custom metrics with Prometheus's default registry
+	prometheus.MustRegister(gpuUtilizationMetric)
+	prometheus.MustRegister(gpuMemoryUsageMetric)
+	prometheus.MustRegister(ioReadBytesMetric)
+	prometheus.MustRegister(ioWriteBytesMetric)
 }
-
 
 func getJobIDFromPID(pid string) (string, error) {
 	path := fmt.Sprintf("/proc/%s/cgroup", pid)
@@ -104,28 +103,28 @@ func collectGPUMetrics() {
 	// Process computeAppsOutput and update Prometheus metrics
 	computeAppsLines := strings.Split(strings.TrimSpace(string(computeAppsOutput)), "\n")
 	for _, line := range computeAppsLines {
-        parts := strings.Split(line, ", ")
-        if len(parts) == 3 {
-            pid := parts[0]
-            usedMemory, err := strconv.ParseFloat(strings.Trim(parts[1], " MiB"), 64)
-            if err != nil {
-                fmt.Printf("Error parsing used GPU memory for PID %s: %v\n", pid, err)
-                continue
-            }
-            uuid := parts[2]
+		parts := strings.Split(line, ", ")
+		if len(parts) == 3 {
+			pid := parts[0]
+			usedMemory, err := strconv.ParseFloat(strings.Trim(parts[1], " MiB"), 64)
+			if err != nil {
+				fmt.Printf("Error parsing used GPU memory for PID %s: %v\n", pid, err)
+				continue
+			}
+			uuid := parts[2]
 
-            if index, exists := gpuUUIDToIndex[uuid]; exists {
-                jobID, err := getJobIDFromPID(pid)
-                if err != nil {
-                    fmt.Printf("Error fetching job ID for PID %s: %v\n", pid, err)
-                    continue
-                }
+			if index, exists := gpuUUIDToIndex[uuid]; exists {
+				jobID, err := getJobIDFromPID(pid)
+				if err != nil {
+					fmt.Printf("Error fetching job ID for PID %s: %v\n", pid, err)
+					continue
+				}
 
-                gpuMemoryUsageMetric.With(prometheus.Labels{"gpu_id": index, "job_id": jobID}).Set(usedMemory * 1024 * 1024) // Convert MiB to bytes
-                // Note: You should update gpuUtilizationMetric similarly if you have that data available.
-            }
-        }
-    }
+				gpuMemoryUsageMetric.With(prometheus.Labels{"gpu_id": index, "job_id": jobID}).Set(usedMemory * 1024 * 1024) // Convert MiB to bytes
+				// Note: You should update gpuUtilizationMetric similarly if you have that data available.
+			}
+		}
+	}
 }
 
 func collectIOMetrics() {
@@ -144,54 +143,55 @@ func collectIOMetrics() {
 	}
 
 	for _, pid := range pids {
-	        if _, err := strconv.Atoi(pid); err == nil {
-	            jobID, err := getJobIDFromPID(pid)
-	            if err != nil {
-	                fmt.Printf("Error fetching job ID for PID %s: %v\n", pid, err)
-	                continue
-	            }
-	
-	            ioFilePath := fmt.Sprintf("/proc/%s/io", pid)
-	            content, err := os.ReadFile(ioFilePath)
-	            if err != nil {
-	                fmt.Printf("Error reading IO file for PID %s: %v\n", pid, err)
-	                continue
-	            }
-	
-	            for _, line := range strings.Split(string(content), "\n") {
-	                parts := strings.Split(line, ":")
-	                if len(parts) == 2 {
-	                    key := strings.TrimSpace(parts[0])
-	                    value, err := strconv.ParseFloat(strings.TrimSpace(parts[1]), 64)
-	                    if err != nil {
-	                        fmt.Printf("Error parsing IO metric for PID %s: %v\n", pid, err)
-	                        continue
-	                    }
-	
-	                    if key == "read_bytes" {
-	                        ioReadBytesMetric.With(prometheus.Labels{"pid": pid, "job_id": jobID}).Set(value)
-	                    } else if key == "write_bytes" {
-	                        ioWriteBytesMetric.With(prometheus.Labels{"pid": pid, "job_id": jobID}).Set(value)
-	                    }
-	                }
-	            }
-	        }
-	    }
+		if _, err := strconv.Atoi(pid); err == nil {
+			jobID, err := getJobIDFromPID(pid)
+			if err != nil {
+				fmt.Printf("Error fetching job ID for PID %s: %v\n", pid, err)
+				continue
+			}
+
+			ioFilePath := fmt.Sprintf("/proc/%s/io", pid)
+			content, err := os.ReadFile(ioFilePath)
+			if err != nil {
+				fmt.Printf("Error reading IO file for PID %s: %v\n", pid, err)
+				continue
+			}
+
+			for _, line := range strings.Split(string(content), "\n") {
+				parts := strings.Split(line, ":")
+				if len(parts) == 2 {
+					key := strings.TrimSpace(parts[0])
+					value, err := strconv.ParseFloat(strings.TrimSpace(parts[1]), 64)
+					if err != nil {
+						fmt.Printf("Error parsing IO metric for PID %s: %v\n", pid, err)
+						continue
+					}
+
+					if key == "read_bytes" {
+						ioReadBytesMetric.With(prometheus.Labels{"pid": pid, "job_id": jobID}).Set(value)
+					} else if key == "write_bytes" {
+						ioWriteBytesMetric.With(prometheus.Labels{"pid": pid, "job_id": jobID}).Set(value)
+					}
+				}
+			}
+		}
 	}
+}
 
 func main() {
-    go func() {
-        ticker := time.NewTicker(10 * time.Second)
-        for {
-            select {
-            case <-ticker.C:
-                collectGPUMetrics()
-                collectIOMetrics()
-            }
-        }
-    }()
+	go func() {
+		ticker := time.NewTicker(10 * time.Second)
+		for {
+			select {
+			case <-ticker.C:
+				collectGPUMetrics()
+				collectIOMetrics()
+			}
+		}
+	}()
 
-    http.Handle("/metrics", promhttp.Handler())
-    fmt.Println("Serving metrics at /metrics")
-    http.ListenAndServe(":9060", nil)
+	http.Handle("/metrics", promhttp.Handler())
+	fmt.Println("Serving metrics at /metrics")
+	//Exposes metrics via http://localhost:9060/metrics
+	http.ListenAndServe(":9060", nil)
 }
