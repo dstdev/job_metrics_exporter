@@ -12,7 +12,7 @@ This script collects GPU and I/O metrics on a system using NVIDIA-SMI commands a
 ### Overview
 This is the Golang script that collects GPU and I/O metrics on a system using NVIDIA-SMI commands and connects thought prometheus through port 
 
-### Setup  
+### Setup 
     To run the application: 
 
     ```
