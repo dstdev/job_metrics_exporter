@@ -42,6 +42,12 @@ func init() {
 	prometheus.MustRegister(gpuMemoryUsageMetric)
 	prometheus.MustRegister(ioReadBytesMetric)
 	prometheus.MustRegister(ioWriteBytesMetric)
+
+	//Initalize metrics to zero
+	gpuMemoryUsageMetric.WithLabelValues("none", "none").Set(0)
+	gpuUtilizationMetric.WithLabelValues("none", "none").Set(0)
+	ioReadBytesMetric.WithLabelValues("none", "none").Set(0)
+	ioWriteBytesMetric.WithLabelValues("none", "none").Set(0)
 }
 
 func getJobIDFromPID(pid string) (string, error) {
