@@ -43,7 +43,7 @@ func init() {
 	prometheus.MustRegister(ioReadBytesMetric)
 	prometheus.MustRegister(ioWriteBytesMetric)
 
-	//Initalize metrics to zero
+	//Initalize metrics to zero for trakcing 0% utilization
 	gpuMemoryUsageMetric.WithLabelValues("none", "none").Set(0)
 	gpuUtilizationMetric.WithLabelValues("none", "none").Set(0)
 	ioReadBytesMetric.WithLabelValues("none", "none").Set(0)
