@@ -13,18 +13,20 @@ This script collects GPU and I/O metrics on a system using NVIDIA-SMI commands a
 This is the Golang script that collects GPU and I/O metrics on a system using NVIDIA-SMI commands and connects thought prometheus through port 
 
 ### Setup 
-    To run the application: 
+To run the application: 
 
     ```
     go run metrics.go
     ```
     
-    To access the metrics:
+To access the metrics:
 
-    ```http://localhost:9060/mertrics ```
+    ```
+    http://localhost:9060/mertrics 
+    ```
     
 
-    Configure the prometheus instance to scrape metrics from golang application:
+Configure the prometheus instance to scrape metrics from golang application:
 
     ```
         scrape_configs:
