@@ -15,9 +15,5 @@ jobs:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           goos: linux
           goarch: amd64
-          binary_name: job_metrics_exporter-${{ github.run_number }}
-          asset_name: job_metrics_exporter-${{ github.run_number }}.tar.gz
-          release_tag: ${{ github.ref }}
-          release_name: Release ${{ github.run_number }}
-          overwrite: true  # Overwrite existing assets
-          upload: true
+          binary_name: job_metrics_exporter
+          overwrite: true  
