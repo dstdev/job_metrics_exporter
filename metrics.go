@@ -50,8 +50,12 @@ func init() {
 	ioWriteBytesMetric.WithLabelValues("none", "none").Set(0)
 }
 
+// Curent function basicalllu brute forces the pid so searching from another path would be best
 func getJobIDFromPID(pid string) (string, error) {
-	path := fmt.Sprintf("/proc/%s/cgroup", pid)
+	//path to uid
+	path := fmt.Sprintf("/sys/fs/cgroup/cpu/slurm/%s")
+	//in each uid_# folder grab the job_#
+	org_path := fmt.Sprintf("/proc/%s/cgroup", pid)
 	file, err := os.Open(path)
 	if err != nil {
 		return "", err
