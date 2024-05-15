@@ -53,19 +53,19 @@ func init() {
 // Updated function for optimization
 func getJobIDFromPID(pid string) (string, error) {
 	// Base path to slurm
-	basePath := fmt.Sprintf("/sys/fs/cgroup/cpu/slurm")
+	basePath := "/sys/fs/cgroup/cpu/slurm"
 
 	//Open the base path directory (/sys/fs/cgrouos/cpu/slurm)
 	baseDir, err := os.Open(basePath)
 	if err != nil {
-		return "", fmt.Errorf("Failed to open the base directory: %v", err)
+		return "", fmt.Errorf("failed to open the base directory: %v", err)
 	}
 	defer baseDir.Close()
 
 	//Read entries
 	entries, err := baseDir.Readdirnames(-1)
-	if eer != nil {
-		return "", fmt.Errorf("Failed to read the entires in the directory: %v", err)
+	if err != nil {
+		return "", fmt.Errorf("failed to read the entires in the directory: %v", err)
 	}
 
 	// Iterate over each entry looking for uid directories
