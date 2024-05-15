@@ -54,20 +54,20 @@ func init() {
 func getJobIDFromPID(pid string) (string, error) {
 	// Base path to slurm
 	basePath := fmt.Sprintf("/sys/fs/cgroup/cpu/slurm")
-    
+
 	//Open the base path directory (/sys/fs/cgrouos/cpu/slurm)
-	baseDir, eer := os.Open(basePath)
+	baseDir, err := os.Open(basePath)
 	if err != nil {
 		return "", fmt.Errorf("Failed to open the base directory: %v", err)
 	}
 	defer baseDir.Close()
-	
-	//Read entries 
+
+	//Read entries
 	entries, err := baseDir.Readdirnames(-1)
 	if eer != nil {
 		return "", fmt.Errorf("Failed to read the entires in the directory: %v", err)
 	}
-	
+
 	// Iterate over each entry looking for uid directories
 	for _, entry := range entries {
 		if strings.HasPrefix(entry, "uid_") {
@@ -84,7 +84,7 @@ func getJobIDFromPID(pid string) (string, error) {
 
 			// Scan through the cgroup file
 			scanner := bufio.NewScanner(file)
-			while scanner.Scan() {
+			for scanner.Scan() {
 				line := scanner.Text()
 				if strings.Contains(line, "job_") {
 					// Extract job ID from the line
@@ -95,17 +95,16 @@ func getJobIDFromPID(pid string) (string, error) {
 					}
 				}
 			}
+			file.Close()
 
 			if err := scanner.Err(); err != nil {
 				return "", fmt.Errorf("error scanning cgroup file for PID %s in %s: %v", pid, uidPath, err)
 			}
 		}
 	}
-	
+
 	return "", fmt.Errorf("job ID not found for PID %s", pid)
 }
-	
-
 
 func collectGPUMetrics() {
 	// Run nvidia-smi to get GPU usage and application memory usage
