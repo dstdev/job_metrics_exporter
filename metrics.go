@@ -56,7 +56,7 @@ func getJobIDFromPID(pid string) (string, error) {
 	basePath := fmt.Sprintf("/sys/fs/cgroup/cpu/slurm")
     
 	//Open the base path directory (/sys/fs/cgrouos/cpu/slurm)
-	baseDir, eer : os.Open(basePath)
+	baseDir, eer := os.Open(basePath)
 	if err != nil {
 		return "", fmt.Errorf("Failed to open the base directory: %v", err)
 	}
@@ -101,7 +101,7 @@ func getJobIDFromPID(pid string) (string, error) {
 			}
 		}
 	}
-
+	
 	return "", fmt.Errorf("job ID not found for PID %s", pid)
 }
 	
