@@ -67,35 +67,45 @@ func getJobIDFromPID(pid string) (string, error) {
 	if eer != nil {
 		return "", fmt.Errorf("Failed to read the entires in the directory: %v", err)
 	}
+	
+	// Iterate over each entry looking for uid directories
+	for _, entry := range entries {
+		if strings.HasPrefix(entry, "uid_") {
+			// Construct path for this uid directory
+			uidPath := fmt.Sprintf("%s/%s", basePath, entry)
 
+			// Attempt to open the cgroup file within this uid directory
+			path := fmt.Sprintf("%s/%s", uidPath, pid)
+			file, err := os.Open(path)
+			if err != nil {
+				continue // If unable to open, skip to next directory
+			}
+			defer file.Close()
 
-	//i	n each uid_# folder grab the job_#
-	org_path := fmt.Sprintf("/proc/%s/cgroup", pid)
-	file, err := os.Open(path)
-	if err != nil {
-		return "", err
-	}
-	defer file.Close()
+			// Scan through the cgroup file
+			scanner := bufio.NewScanner(file)
+			while scanner.Scan() {
+				line := scanner.Text()
+				if strings.Contains(line, "job_") {
+					// Extract job ID from the line
+					parts := strings.Split(line, "job_")
+					if len(parts) > 1 {
+						jobID := strings.Split(parts[1], "/")[0]
+						return jobID, nil
+					}
+				}
+			}
 
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		line := scanner.Text()
-		if strings.Contains(line, "slurm") && strings.Contains(line, "job_") {
-			// Extract job ID from the line
-			parts := strings.Split(line, "job_")
-			if len(parts) > 1 {
-				jobID := strings.Split(parts[1], "/")[0]
-				return jobID, nil
+			if err := scanner.Err(); err != nil {
+				return "", fmt.Errorf("error scanning cgroup file for PID %s in %s: %v", pid, uidPath, err)
 			}
 		}
 	}
 
-	if err := scanner.Err(); err != nil {
-		return "", err
-	}
-
 	return "", fmt.Errorf("job ID not found for PID %s", pid)
 }
+	
+
 
 func collectGPUMetrics() {
 	// Run nvidia-smi to get GPU usage and application memory usage
