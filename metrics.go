@@ -50,11 +50,26 @@ func init() {
 	ioWriteBytesMetric.WithLabelValues("none", "none").Set(0)
 }
 
-// Curent function basicalllu brute forces the pid so searching from another path would be best
+// Updated function for optimization
 func getJobIDFromPID(pid string) (string, error) {
-	//path to uid
-	path := fmt.Sprintf("/sys/fs/cgroup/cpu/slurm/%s")
-	//in each uid_# folder grab the job_#
+	// Base path to slurm
+	basePath := fmt.Sprintf("/sys/fs/cgroup/cpu/slurm")
+    
+	//Open the base path directory (/sys/fs/cgrouos/cpu/slurm)
+	baseDir, eer : os.Open(basePath)
+	if err != nil {
+		return "", fmt.Errorf("Failed to open the base directory: %v", err)
+	}
+	defer baseDir.Close()
+	
+	//Read entries 
+	entries, err := baseDir.Readdirnames(-1)
+	if eer != nil {
+		return "", fmt.Errorf("Failed to read the entires in the directory: %v", err)
+	}
+
+
+	//i	n each uid_# folder grab the job_#
 	org_path := fmt.Sprintf("/proc/%s/cgroup", pid)
 	file, err := os.Open(path)
 	if err != nil {
