@@ -50,48 +50,70 @@ func init() {
 	ioWriteBytesMetric.WithLabelValues("none", "none").Set(0)
 }
 
-// Updated function for optimization
+// getJobIDFromPID finds the job ID for a given PID from the Slurm cgroup directory
 func getJobIDFromPID(pid string) (string, error) {
-	// Base path to slurm
+	// Base path to Slurm
 	basePath := "/sys/fs/cgroup/cpu/slurm"
 
-	//Open the base path directory (/sys/fs/cgrouos/cpu/slurm)
+	// Open the base path directory
 	baseDir, err := os.Open(basePath)
 	if err != nil {
 		return "", fmt.Errorf("failed to open the base directory: %v", err)
 	}
 	defer baseDir.Close()
 
-	//Read entries
+	// Read entries
 	entries, err := baseDir.Readdirnames(-1)
 	if err != nil {
-		return "", fmt.Errorf("failed to read the entires in the directory: %v", err)
+		return "", fmt.Errorf("failed to read the entries in the directory: %v", err)
 	}
 
 	// Iterate over each entry looking for uid directories
 	for _, entry := range entries {
 		if strings.HasPrefix(entry, "uid_") {
 			// Construct path for this uid directory
-			uidPath := fmt.Sprintf("%s/%s/job_%s/cgroup.procs", basePath, entry, pid)
+			uidPath := fmt.Sprintf("%s/%s", basePath, entry)
 
-			// Attempt to open the cgroup file within this uid directory
-			file, err := os.Open(uidPath)
+			// Open the uid directory
+			uidDir, err := os.Open(uidPath)
 			if err != nil {
-				continue // If unable to open, skip to next directory
+				continue // If unable to open, skip to next uid directory
 			}
-			defer file.Close())
 
-			// Scan through the cgroup file
-			scanner := bufio.NewScanner(file)
-			for scanner.Scan() {
-				line := scanner.Text()
-				if line == pid {
-					return entry, nil
+			// Read job entries in the uid directory
+			jobEntries, err := uidDir.Readdirnames(-1)
+			uidDir.Close()
+			if err != nil {
+				continue // If unable to read, skip to next uid directory
+			}
+
+			// Iterate over job entries
+			for _, jobEntry := range jobEntries {
+				if strings.HasPrefix(jobEntry, "job_") {
+					// Construct path for this job directory
+					jobPath := fmt.Sprintf("%s/%s/cgroup.procs", uidPath, jobEntry)
+
+					// Attempt to open the cgroup.procs file within this job directory
+					file, err := os.Open(jobPath)
+					if err != nil {
+						continue // If unable to open, skip to next job directory
+					}
+
+					// Scan through the cgroup.procs file
+					scanner := bufio.NewScanner(file)
+					for scanner.Scan() {
+						line := scanner.Text()
+						if line == pid {
+							file.Close()
+							return strings.TrimPrefix(jobEntry, "job_"), nil
+						}
+					}
+					file.Close()
+
+					if err := scanner.Err(); err != nil {
+						return "", fmt.Errorf("error scanning cgroup file for PID %s in %s: %v", pid, jobPath, err)
+					}
 				}
-			}
-
-			if err := scanner.Err(); err != nil {
-				return "", fmt.Errorf("error scanning cgroup file for PID %s in %s: %v", pid, uidPath, err)
 			}
 		}
 	}
