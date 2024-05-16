@@ -72,30 +72,23 @@ func getJobIDFromPID(pid string) (string, error) {
 	for _, entry := range entries {
 		if strings.HasPrefix(entry, "uid_") {
 			// Construct path for this uid directory
-			uidPath := fmt.Sprintf("%s/%s", basePath, entry)
+			uidPath := fmt.Sprintf("%s/%s/job_%s/cgroup.procs", basePath, entry, pid)
 
 			// Attempt to open the cgroup file within this uid directory
-			path := fmt.Sprintf("%s/%s", uidPath, pid)
-			file, err := os.Open(path)
+			file, err := os.Open(uidPath)
 			if err != nil {
 				continue // If unable to open, skip to next directory
 			}
-			defer file.Close()
+			defer file.Close())
 
 			// Scan through the cgroup file
 			scanner := bufio.NewScanner(file)
 			for scanner.Scan() {
 				line := scanner.Text()
-				if strings.Contains(line, "job_") {
-					// Extract job ID from the line
-					parts := strings.Split(line, "job_")
-					if len(parts) > 1 {
-						jobID := strings.Split(parts[1], "/")[0]
-						return jobID, nil
-					}
+				if line == pid {
+					return entry, nil
 				}
 			}
-			file.Close()
 
 			if err := scanner.Err(); err != nil {
 				return "", fmt.Errorf("error scanning cgroup file for PID %s in %s: %v", pid, uidPath, err)
@@ -155,7 +148,6 @@ func collectGPUMetrics() {
 				}
 
 				gpuMemoryUsageMetric.With(prometheus.Labels{"gpu_id": index, "job_id": jobID}).Set(usedMemory * 1024 * 1024) // Convert MiB to bytes
-				// Note: You should update gpuUtilizationMetric similarly if you have that data available.
 			}
 		}
 	}
