@@ -176,55 +176,106 @@ func collectGPUMetrics() {
 }
 
 func collectIOMetrics() {
-	// Iterate over PIDs and collect IO metrics
-	procDir, err := os.Open("/proc")
+	// Base path to Slurm
+	basePath := "/sys/fs/cgroup/cpu/slurm"
+
+	// Open the base path directory
+	baseDir, err := os.Open(basePath)
 	if err != nil {
-		fmt.Printf("Failed to open /proc: %s\n", err)
+		fmt.Printf("Failed to open the base directory: %s\n", err)
 		return
 	}
-	defer procDir.Close()
+	defer baseDir.Close()
 
-	pids, err := procDir.Readdirnames(-1)
+	// Read entries
+	entries, err := baseDir.Readdirnames(-1)
 	if err != nil {
-		fmt.Printf("Failed to read /proc: %s\n", err)
+		fmt.Printf("Failed to read the entries in the directory: %s\n", err)
 		return
 	}
 
-	for _, pid := range pids {
-		if _, err := strconv.Atoi(pid); err == nil {
-			jobID, err := getJobIDFromPID(pid)
+	// Iterate over each entry looking for uid directories
+	for _, entry := range entries {
+		if strings.HasPrefix(entry, "uid_") {
+			// Construct path for this uid directory
+			uidPath := fmt.Sprintf("%s/%s", basePath, entry)
+
+			// Open the uid directory
+			uidDir, err := os.Open(uidPath)
 			if err != nil {
-				fmt.Printf("Error fetching job ID for PID %s: %v\n", pid, err)
-				continue
+				fmt.Printf("Failed to open UID directory %s: %s\n", uidPath, err)
+				continue // If unable to open, skip to next uid directory
 			}
 
-			ioFilePath := fmt.Sprintf("/proc/%s/io", pid)
-			content, err := os.ReadFile(ioFilePath)
+			// Read job entries in the uid directory
+			jobEntries, err := uidDir.Readdirnames(-1)
+			uidDir.Close()
 			if err != nil {
-				fmt.Printf("Error reading IO file for PID %s: %v\n", pid, err)
-				continue
+				fmt.Printf("Failed to read job entries in UID directory %s: %s\n", uidPath, err)
+				continue // If unable to read, skip to next uid directory
 			}
 
-			for _, line := range strings.Split(string(content), "\n") {
-				parts := strings.Split(line, ":")
-				if len(parts) == 2 {
-					key := strings.TrimSpace(parts[0])
-					value, err := strconv.ParseFloat(strings.TrimSpace(parts[1]), 64)
-					if err != nil {
-						fmt.Printf("Error parsing IO metric for PID %s: %v\n", pid, err)
+			// Iterate over job entries
+			for _, jobEntry := range jobEntries {
+				if strings.HasPrefix(jobEntry, "job_") {
+					// Construct path for this job directory
+					jobPath := fmt.Sprintf("%s/%s", uidPath, jobEntry)
+					cgroupProcsPath := filepath.Join(jobPath, "cgroup.procs")
+
+					// Check if cgroup.procs file exists
+					if _, err := os.Stat(cgroupProcsPath); os.IsNotExist(err) {
+						fmt.Printf("No cgroup.procs file for job %s (UID %s), skipping\n", jobEntry, entry)
 						continue
 					}
 
-					if key == "read_bytes" {
-						ioReadBytesMetric.With(prometheus.Labels{"pid": pid, "job_id": jobID}).Set(value)
-					} else if key == "write_bytes" {
-						ioWriteBytesMetric.With(prometheus.Labels{"pid": pid, "job_id": jobID}).Set(value)
+					// Read the PIDs from the cgroup.procs file
+					pids, err := ioutil.ReadFile(cgroupProcsPath)
+					if err != nil {
+						fmt.Printf("Failed to read cgroup.procs for job %s (UID %s): %v\n", jobEntry, entry, err)
+						continue
+					}
+
+					// If no PIDs, initialize I/O metrics to zero and skip this job
+					if len(strings.Fields(string(pids))) == 0 {
+						fmt.Printf("No PIDs found in cgroup.procs for job %s (UID %s), initializing I/O metrics to zero\n", jobEntry, entry)
+						ioReadBytesMetric.With(prometheus.Labels{"pid": "none", "job_id": jobEntry}).Set(0)
+						ioWriteBytesMetric.With(prometheus.Labels{"pid": "none", "job_id": jobEntry}).Set(0)
+						continue
+					}
+
+					// Collect I/O metrics for each PID
+					for _, pid := range strings.Fields(string(pids)) {
+						ioFilePath := fmt.Sprintf("/proc/%s/io", pid)
+						content, err := os.ReadFile(ioFilePath)
+						if err != nil {
+							fmt.Printf("Error reading IO file for PID %s: %v\n", pid, err)
+							continue
+						}
+
+						for _, line := range strings.Split(string(content), "\n") {
+							parts := strings.Split(line, ":")
+							if len(parts) == 2 {
+								key := strings.TrimSpace(parts[0])
+								value, err := strconv.ParseFloat(strings.TrimSpace(parts[1]), 64)
+								if err != nil {
+									fmt.Printf("Error parsing IO metric for PID %s: %v\n", pid, err)
+									continue
+								}
+
+								if key == "read_bytes" {
+									ioReadBytesMetric.With(prometheus.Labels{"pid": pid, "job_id": jobEntry}).Set(value)
+								} else if key == "write_bytes" {
+									ioWriteBytesMetric.With(prometheus.Labels{"pid": pid, "job_id": jobEntry}).Set(value)
+								}
+							}
+						}
 					}
 				}
 			}
 		}
 	}
 }
+
 
 func main() {
 	go func() {
