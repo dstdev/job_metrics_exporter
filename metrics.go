@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -229,7 +230,7 @@ func collectIOMetrics() {
 					}
 
 					// Read the PIDs from the cgroup.procs file
-					pids, err := ioutil.ReadFile(cgroupProcsPath)
+					pids, err := os.ReadFile(cgroupProcsPath)
 					if err != nil {
 						fmt.Printf("Failed to read cgroup.procs for job %s (UID %s): %v\n", jobEntry, entry, err)
 						continue
@@ -275,7 +276,6 @@ func collectIOMetrics() {
 		}
 	}
 }
-
 
 func main() {
 	go func() {
