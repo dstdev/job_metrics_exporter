@@ -51,6 +51,8 @@ func init() {
 	ioWriteBytesMetric.WithLabelValues("none", "none").Set(0)
 }
 
+//Added function to get current runing jobs
+
 // getJobIDFromPID finds the job ID for a given PID from the Slurm cgroup directory
 func getJobIDFromPID(pid string) (string, error) {
 	// Base path to Slurm
