@@ -107,37 +107,47 @@ func getJobIDFromPID(pid string) (string, error) {
 			}
 
 			// Iterate over job entries
-			for _, jobEntry := range jobEntries {
-				if strings.HasPrefix(jobEntry, "job_") {
-					// Construct path for this job directory
-					jobPath := fmt.Sprintf("%s/%s/cgroup.procs", uidPath, jobEntry)
+			for _, jobEntry := enumerateJobEntries(jobEntries, uidPath) {
+				jobPath := fmt.Sprintf("%s/%s/cgroup.procs", uidPath, jobEntry)
 
-					// Attempt to open the cgroup.procs file within this job directory
-					file, err := os.Open(jobPath)
-					if err != nil {
-						continue // If unable to open, skip to next job directory
-					}
+				// Attempt to open the cgroup.procs file within this job directory
+				file, err := os.Open(jobPath)
+				if err != nil {
+					continue // If unable to open, skip to next job directory
+				}
 
-					// Scan through the cgroup.procs file
-					scanner := bufio.NewScanner(file)
-					for scanner.Scan() {
-						line := scanner.Text()
-						if line == pid {
-							file.Close()
-							return strings.TrimPrefix(jobEntry, "job_"), nil
-						}
+				// Scan through the cgroup.procs file
+				scanner := bufio.NewScanner(file)
+				for scanner.Scan() {
+					line := scanner.Text()
+					if line == pid {
+						file.Close()
+						return strings.TrimPrefix(jobEntry, "job_"), nil
 					}
-					file.Close()
+				}
+				file.Close()
 
-					if err := scanner.Err(); err != nil {
-						return "", fmt.Errorf("error scanning cgroup file for PID %s in %s: %v", pid, jobPath, err)
-					}
+				if err := scanner.Err(); err != nil {
+					return "", fmt.Errorf("error scanning cgroup file for PID %s in %s: %v", pid, jobPath, err)
 				}
 			}
 		}
 	}
 
 	return "", fmt.Errorf("job ID not found for PID %s", pid)
+}
+
+func enumerateJobEntries(jobEntries []string, uidPath string) <-chan string {
+	ch := make(chan string, len(jobEntries))
+	go func() {
+		defer close(ch)
+		for _, jobEntry := range jobEntries {
+			if strings.HasPrefix(jobEntry, "job_") {
+				ch <- jobEntry
+			}
+		}
+	}()
+	return ch
 }
 
 func collectGPUMetrics() {
@@ -168,6 +178,17 @@ func collectGPUMetrics() {
 		}
 	}
 
+	// Get the list of running jobs
+	jobIDs, err := getRunningJobs()
+	if err != nil {
+		fmt.Printf("Error fetching running jobs: %v\n", err)
+		return
+	}
+	jobIDSet := make(map[string]struct{})
+	for _, jobID := range jobIDs {
+		jobIDSet[jobID] = struct{}{}
+	}
+
 	// Process computeAppsOutput and update Prometheus metrics
 	computeAppsLines := strings.Split(strings.TrimSpace(string(computeAppsOutput)), "\n")
 	for _, line := range computeAppsLines {
@@ -188,7 +209,9 @@ func collectGPUMetrics() {
 					continue
 				}
 
-				gpuMemoryUsageMetric.With(prometheus.Labels{"gpu_id": index, "job_id": jobID}).Set(usedMemory * 1024 * 1024) // Convert MiB to bytes
+				if _, exists := jobIDSet[jobID]; exists {
+					gpuMemoryUsageMetric.With(prometheus.Labels{"gpu_id": index, "job_id": jobID}).Set(usedMemory * 1024 * 1024) // Convert MiB to bytes
+				}
 			}
 		}
 	}
@@ -234,9 +257,25 @@ func collectIOMetrics() {
 				continue // If unable to read, skip to next uid directory
 			}
 
+			// Get the list of running jobs
+			jobIDs, err := getRunningJobs()
+			if err != nil {
+				fmt.Printf("Error fetching running jobs: %v\n", err)
+				return
+			}
+			jobIDSet := make(map[string]struct{})
+			for _, jobID := range jobIDs {
+				jobIDSet[jobID] = struct{}{}
+			}
+
 			// Iterate over job entries
 			for _, jobEntry := range jobEntries {
 				if strings.HasPrefix(jobEntry, "job_") {
+					// Check if the job is currently running
+					if _, exists := jobIDSet[strings.TrimPrefix(jobEntry, "job_")]; !exists {
+						continue
+					}
+
 					// Construct path for this job directory
 					jobPath := fmt.Sprintf("%s/%s", uidPath, jobEntry)
 					cgroupProcsPath := filepath.Join(jobPath, "cgroup.procs")
@@ -309,6 +348,7 @@ func main() {
 
 	http.Handle("/metrics", promhttp.Handler())
 	fmt.Println("Serving metrics at /metrics")
-	//Exposes metrics via http://localhost:9060/metrics
+	// Exposes metrics via http://localhost:9060/metrics
 	http.ListenAndServe(":9060", nil)
 }
+
