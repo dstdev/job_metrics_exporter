@@ -52,6 +52,22 @@ func init() {
 }
 
 //Added function to get current runing jobs
+// getRunningJobs gets the list of current running jobs on the node
+func getRunningJobs() ([]string, error) {
+	hostname, err := os.Hostname()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get hostname: %v", err)
+	}
+
+	squeueCmd := exec.Command("bash", "-c", fmt.Sprintf("squeue -h -o %%A -w %s", hostname))
+	squeueOutput, err := squeueCmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("failed to execute squeue command: %v", err)
+	}
+
+	jobIDs := strings.Fields(string(squeueOutput))
+	return jobIDs, nil
+}
 
 // getJobIDFromPID finds the job ID for a given PID from the Slurm cgroup directory
 func getJobIDFromPID(pid string) (string, error) {
