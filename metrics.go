@@ -51,24 +51,6 @@ func init() {
 	ioWriteBytesMetric.WithLabelValues("none", "none").Set(0)
 }
 
-// Added function to get current runing jobs
-// getRunningJobs gets the list of current running jobs on the node
-func getRunningJobs() ([]string, error) {
-	hostname, err := os.Hostname()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get hostname: %v", err)
-	}
-
-	squeueCmd := exec.Command("bash", "-c", fmt.Sprintf("squeue -h -o %%A -w %s", hostname))
-	squeueOutput, err := squeueCmd.Output()
-	if err != nil {
-		return nil, fmt.Errorf("failed to execute squeue command: %v", err)
-	}
-
-	jobIDs := strings.Fields(string(squeueOutput))
-	return jobIDs, nil
-}
-
 // getJobIDFromPID finds the job ID for a given PID from the Slurm cgroup directory
 func getJobIDFromPID(pid string) (string, error) {
 	// Base path to Slurm
@@ -107,28 +89,31 @@ func getJobIDFromPID(pid string) (string, error) {
 			}
 
 			// Iterate over job entries
-			for _, jobEntry := enumerateJobEntries(jobEntries, uidPath) {
-				jobPath := fmt.Sprintf("%s/%s/cgroup.procs", uidPath, jobEntry)
+			for _, jobEntry := range jobEntries {
+				if strings.HasPrefix(jobEntry, "job_") {
+					// Construct path for this job directory
+					jobPath := fmt.Sprintf("%s/%s/cgroup.procs", uidPath, jobEntry)
 
-				// Attempt to open the cgroup.procs file within this job directory
-				file, err := os.Open(jobPath)
-				if err != nil {
-					continue // If unable to open, skip to next job directory
-				}
-
-				// Scan through the cgroup.procs file
-				scanner := bufio.NewScanner(file)
-				for scanner.Scan() {
-					line := scanner.Text()
-					if line == pid {
-						file.Close()
-						return strings.TrimPrefix(jobEntry, "job_"), nil
+					// Attempt to open the cgroup.procs file within this job directory
+					file, err := os.Open(jobPath)
+					if err != nil {
+						continue // If unable to open, skip to next job directory
 					}
-				}
-				file.Close()
 
-				if err := scanner.Err(); err != nil {
-					return "", fmt.Errorf("error scanning cgroup file for PID %s in %s: %v", pid, jobPath, err)
+					// Scan through the cgroup.procs file
+					scanner := bufio.NewScanner(file)
+					for scanner.Scan() {
+						line := scanner.Text()
+						if line == pid {
+							file.Close()
+							return strings.TrimPrefix(jobEntry, "job_"), nil
+						}
+					}
+					file.Close()
+
+					if err := scanner.Err(); err != nil {
+						return "", fmt.Errorf("error scanning cgroup file for PID %s in %s: %v", pid, jobPath, err)
+					}
 				}
 			}
 		}
@@ -148,6 +133,24 @@ func enumerateJobEntries(jobEntries []string, uidPath string) <-chan string {
 		}
 	}()
 	return ch
+}
+
+// Added function to get current runing jobs
+// getRunningJobs gets the list of current running jobs on the node
+func getRunningJobs() ([]string, error) {
+	hostname, err := os.Hostname()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get hostname: %v", err)
+	}
+
+	squeueCmd := exec.Command("bash", "-c", fmt.Sprintf("squeue -h -o %%A -w %s", hostname))
+	squeueOutput, err := squeueCmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("failed to execute squeue command: %v", err)
+	}
+
+	jobIDs := strings.Fields(string(squeueOutput))
+	return jobIDs, nil
 }
 
 func collectGPUMetrics() {
@@ -351,4 +354,3 @@ func main() {
 	// Exposes metrics via http://localhost:9060/metrics
 	http.ListenAndServe(":9060", nil)
 }
-
