@@ -122,20 +122,6 @@ func getJobIDFromPID(pid string) (string, error) {
 	return "", fmt.Errorf("job ID not found for PID %s", pid)
 }
 
-func enumerateJobEntries(jobEntries []string, uidPath string) <-chan string {
-	ch := make(chan string, len(jobEntries))
-	go func() {
-		defer close(ch)
-		for _, jobEntry := range jobEntries {
-			if strings.HasPrefix(jobEntry, "job_") {
-				ch <- jobEntry
-			}
-		}
-	}()
-	return ch
-}
-
-// Added function to get current runing jobs
 // getRunningJobs gets the list of current running jobs on the node
 func getRunningJobs() ([]string, error) {
 	hostname, err := os.Hostname()
@@ -239,6 +225,17 @@ func collectIOMetrics() {
 		return
 	}
 
+	// Get the list of running jobs
+	jobIDs, err := getRunningJobs()
+	if err != nil {
+		fmt.Printf("Error fetching running jobs: %v\n", err)
+		return
+	}
+	jobIDSet := make(map[string]struct{})
+	for _, jobID := range jobIDs {
+		jobIDSet[jobID] = struct{}{}
+	}
+
 	// Iterate over each entry looking for uid directories
 	for _, entry := range entries {
 		if strings.HasPrefix(entry, "uid_") {
@@ -258,17 +255,6 @@ func collectIOMetrics() {
 			if err != nil {
 				fmt.Printf("Failed to read job entries in UID directory %s: %s\n", uidPath, err)
 				continue // If unable to read, skip to next uid directory
-			}
-
-			// Get the list of running jobs
-			jobIDs, err := getRunningJobs()
-			if err != nil {
-				fmt.Printf("Error fetching running jobs: %v\n", err)
-				return
-			}
-			jobIDSet := make(map[string]struct{})
-			for _, jobID := range jobIDs {
-				jobIDSet[jobID] = struct{}{}
 			}
 
 			// Iterate over job entries
@@ -339,13 +325,11 @@ func collectIOMetrics() {
 
 func main() {
 	go func() {
-		ticker := time.NewTicker(10 * time.Second)
-		for {
-			select {
-			case <-ticker.C:
-				collectGPUMetrics()
-				collectIOMetrics()
-			}
+		ticker := time.NewTicker(2 * time.Second)
+		defer ticker.Stop()
+		for range ticker.C {
+			collectGPUMetrics()
+			collectIOMetrics()
 		}
 	}()
 
