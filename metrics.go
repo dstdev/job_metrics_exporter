@@ -51,7 +51,7 @@ func init() {
 	ioWriteBytesMetric.WithLabelValues("none", "none").Set(0)
 }
 
-//Added function to get current runing jobs
+// Added function to get current runing jobs
 // getRunningJobs gets the list of current running jobs on the node
 func getRunningJobs() ([]string, error) {
 	hostname, err := os.Hostname()
