@@ -1,4 +1,4 @@
-![Build and Test] (https://github.com/dstdev/job_metrics_exporter/actions/runs/9197069431/badge.svg)
+![Build and Test] ()
 # GPU and I/O Metrics Collection
 
 ## Metrics.go
