@@ -122,23 +122,6 @@ func getJobIDFromPID(pid string) (string, error) {
 	return "", fmt.Errorf("job ID not found for PID %s", pid)
 }
 
-// getRunningJobs gets the list of current running jobs on the node
-func getRunningJobs() ([]string, error) {
-	hostname, err := os.Hostname()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get hostname: %v", err)
-	}
-
-	squeueCmd := exec.Command("bash", "-c", fmt.Sprintf("squeue -h -o %%A -w %s", hostname))
-	squeueOutput, err := squeueCmd.Output()
-	if err != nil {
-		return nil, fmt.Errorf("failed to execute squeue command: %v", err)
-	}
-
-	jobIDs := strings.Fields(string(squeueOutput))
-	return jobIDs, nil
-}
-
 func collectGPUMetrics() {
 	// Run nvidia-smi to get GPU usage and application memory usage
 	gpuInfoCmd := exec.Command("bash", "-c", "nvidia-smi --query-gpu=gpu_uuid,index,name,utilization.gpu --format=csv,noheader")
@@ -167,17 +150,6 @@ func collectGPUMetrics() {
 		}
 	}
 
-	// Get the list of running jobs
-	jobIDs, err := getRunningJobs()
-	if err != nil {
-		fmt.Printf("Error fetching running jobs: %v\n", err)
-		return
-	}
-	jobIDSet := make(map[string]struct{})
-	for _, jobID := range jobIDs {
-		jobIDSet[jobID] = struct{}{}
-	}
-
 	// Process computeAppsOutput and update Prometheus metrics
 	computeAppsLines := strings.Split(strings.TrimSpace(string(computeAppsOutput)), "\n")
 	for _, line := range computeAppsLines {
@@ -198,9 +170,7 @@ func collectGPUMetrics() {
 					continue
 				}
 
-				if _, exists := jobIDSet[jobID]; exists {
-					gpuMemoryUsageMetric.With(prometheus.Labels{"gpu_id": index, "job_id": jobID}).Set(usedMemory * 1024 * 1024) // Convert MiB to bytes
-				}
+				gpuMemoryUsageMetric.With(prometheus.Labels{"gpu_id": index, "job_id": jobID}).Set(usedMemory * 1024 * 1024) // Convert MiB to bytes
 			}
 		}
 	}
@@ -223,17 +193,6 @@ func collectIOMetrics() {
 	if err != nil {
 		fmt.Printf("Failed to read the entries in the directory: %s\n", err)
 		return
-	}
-
-	// Get the list of running jobs
-	jobIDs, err := getRunningJobs()
-	if err != nil {
-		fmt.Printf("Error fetching running jobs: %v\n", err)
-		return
-	}
-	jobIDSet := make(map[string]struct{})
-	for _, jobID := range jobIDs {
-		jobIDSet[jobID] = struct{}{}
 	}
 
 	// Iterate over each entry looking for uid directories
@@ -260,11 +219,6 @@ func collectIOMetrics() {
 			// Iterate over job entries
 			for _, jobEntry := range jobEntries {
 				if strings.HasPrefix(jobEntry, "job_") {
-					// Check if the job is currently running
-					if _, exists := jobIDSet[strings.TrimPrefix(jobEntry, "job_")]; !exists {
-						continue
-					}
-
 					// Construct path for this job directory
 					jobPath := fmt.Sprintf("%s/%s", uidPath, jobEntry)
 					cgroupProcsPath := filepath.Join(jobPath, "cgroup.procs")
