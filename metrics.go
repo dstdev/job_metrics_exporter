@@ -225,7 +225,7 @@ func collectIOMetrics() {
 
 					// Check if cgroup.procs file exists
 					if _, err := os.Stat(cgroupProcsPath); os.IsNotExist(err) {
-						fmt.Printf("WARN: No cgroup.procs file for job %s (UID %s), skipping\n", jobEntry, entry)
+						fmt.Printf("No cgroup.procs file for job %s (UID %s), skipping\n", jobEntry, entry)
 						continue
 					}
 
@@ -238,7 +238,7 @@ func collectIOMetrics() {
 
 					// If no PIDs, skip this job
 					if len(strings.Fields(string(pids))) == 0 {
-						fmt.Printf("WARN: No PIDs found in cgroup.procs for job %s (UID %s), skipping\n", jobEntry, entry)
+						fmt.Printf("No PIDs found in cgroup.procs for job %s (UID %s), skipping\n", jobEntry, entry)
 						continue
 					}
 
@@ -248,8 +248,8 @@ func collectIOMetrics() {
 						content, err := os.ReadFile(ioFilePath)
 						if err != nil {
 							fmt.Printf("Error reading IO file for PID %s: %v\n", pid, err)
-							ioReadBytesMetric.With(prometheus.Labels{"pid": pid, "job_id": jobEntry}).Set(0)
-							ioWriteBytesMetric.With(prometheus.Labels{"pid": pid, "job_id": jobEntry}).Set(0)
+							ioReadBytesMetric.With(prometheus.Labels{"pid": pid, "job_id": strings.TrimPrefix(jobEntry, "job_")}).Set(0)
+							ioWriteBytesMetric.With(prometheus.Labels{"pid": pid, "job_id": strings.TrimPrefix(jobEntry, "job_")}).Set(0)
 							continue
 						}
 
@@ -266,20 +266,20 @@ func collectIOMetrics() {
 								}
 
 								if key == "read_bytes" {
-									ioReadBytesMetric.With(prometheus.Labels{"pid": pid, "job_id": jobEntry}).Set(value)
+									ioReadBytesMetric.With(prometheus.Labels{"pid": pid, "job_id": strings.TrimPrefix(jobEntry, "job_")}).Set(value)
 									ioReadSet = true
 								} else if key == "write_bytes" {
-									ioWriteBytesMetric.With(prometheus.Labels{"pid": pid, "job_id": jobEntry}).Set(value)
+									ioWriteBytesMetric.With(prometheus.Labels{"pid": pid, "job_id": strings.TrimPrefix(jobEntry, "job_")}).Set(value)
 									ioWriteSet = true
 								}
 							}
 						}
 
 						if !ioReadSet {
-							ioReadBytesMetric.With(prometheus.Labels{"pid": pid, "job_id": jobEntry}).Set(0)
+							ioReadBytesMetric.With(prometheus.Labels{"pid": pid, "job_id": strings.TrimPrefix(jobEntry, "job_")}).Set(0)
 						}
 						if !ioWriteSet {
-							ioWriteBytesMetric.With(prometheus.Labels{"pid": pid, "job_id": jobEntry}).Set(0)
+							ioWriteBytesMetric.With(prometheus.Labels{"pid": pid, "job_id": strings.TrimPrefix(jobEntry, "job_")}).Set(0)
 						}
 					}
 				}
