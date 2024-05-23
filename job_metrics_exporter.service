@@ -1,0 +1,10 @@
+[Unit]
+Description=Job Metrics Service
+After=network.target
+
+[Service]
+ExecStart=/usr/local/bin/job_metrics_exporter
+Type=simple
+
+[Install]
+WantedBy=multi-user.target
