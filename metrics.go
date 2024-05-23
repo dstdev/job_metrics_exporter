@@ -171,6 +171,7 @@ func collectGPUMetrics() {
 				}
 
 				gpuMemoryUsageMetric.With(prometheus.Labels{"gpu_id": index, "job_id": jobID}).Set(usedMemory * 1024 * 1024) // Convert MiB to bytes
+				gpuUtilizationMetric.With(prometheus.Labels{"gpu_id": index, "job_id": jobID}).Set(0)
 			}
 		}
 	}
@@ -224,7 +225,7 @@ func collectIOMetrics() {
 					cgroupProcsPath := filepath.Join(jobPath, "cgroup.procs")
 
 					// Check if cgroup.procs file exists
-					if _, err := os.Stat(cgroupProcsPath); os.IsNotExist(err) {
+					if _, err := os.Stat(cgroupProcsPath); os.IsNotExist(err)) {
 						fmt.Printf("No cgroup.procs file for job %s (UID %s), skipping\n", jobEntry, entry)
 						continue
 					}
