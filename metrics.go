@@ -225,7 +225,7 @@ func collectIOMetrics() {
 
 					// Check if cgroup.procs file exists
 					if _, err := os.Stat(cgroupProcsPath); os.IsNotExist(err) {
-						fmt.Printf("No cgroup.procs file for job %s (UID %s), skipping\n", jobEntry, entry)
+						fmt.Printf("WARN: No cgroup.procs file for job %s (UID %s), skipping\n", jobEntry, entry)
 						continue
 					}
 
@@ -238,7 +238,7 @@ func collectIOMetrics() {
 
 					// If no PIDs, skip this job
 					if len(strings.Fields(string(pids))) == 0 {
-						fmt.Printf("No PIDs found in cgroup.procs for job %s (UID %s), skipping\n", jobEntry, entry)
+						fmt.Printf("WARN: No PIDs found in cgroup.procs for job %s (UID %s), skipping\n", jobEntry, entry)
 						continue
 					}
 
