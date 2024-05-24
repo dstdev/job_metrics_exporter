@@ -122,19 +122,19 @@ func getJobIDFromPID(pid string) (string, error) {
 	return "", fmt.Errorf("job ID not found for PID %s", pid)
 }
 
-func collectGPUMetrics() {
+func collectGPUMetrics(jobIDs map[string]struct{}) {
 	// Run nvidia-smi to get GPU usage and application memory usage
 	gpuInfoCmd := exec.Command("bash", "-c", "nvidia-smi --query-gpu=gpu_uuid,index,name,utilization.gpu --format=csv,noheader")
 	gpuInfoOutput, err := gpuInfoCmd.Output()
 	if err != nil {
-		fmt.Printf("Failed to execute command: %s\n", err)
+		fmt.Printf("WARN: Failed to execute command: %s\n", err)
 		return
 	}
 
 	computeAppsCmd := exec.Command("bash", "-c", "nvidia-smi --query-compute-apps=pid,used_gpu_memory,gpu_uuid --format=csv,noheader")
 	computeAppsOutput, err := computeAppsCmd.Output()
 	if err != nil {
-		fmt.Printf("Failed to execute command: %s\n", err)
+		fmt.Printf("WARN: Failed to execute command: %s\n", err)
 		return
 	}
 
@@ -158,7 +158,7 @@ func collectGPUMetrics() {
 			pid := parts[0]
 			usedMemory, err := strconv.ParseFloat(strings.Trim(parts[1], " MiB"), 64)
 			if err != nil {
-				fmt.Printf("Error parsing used GPU memory for PID %s: %v\n", pid, err)
+				fmt.Printf("WARN: Error parsing used GPU memory for PID %s: %v\n", pid, err)
 				continue
 			}
 			uuid := parts[2]
@@ -166,18 +166,20 @@ func collectGPUMetrics() {
 			if index, exists := gpuUUIDToIndex[uuid]; exists {
 				jobID, err := getJobIDFromPID(pid)
 				if err != nil {
-					fmt.Printf("Error fetching job ID for PID %s: %v\n", pid, err)
+					fmt.Printf("WARN: Error fetching job ID for PID %s: %v\n", pid, err)
 					continue
 				}
 
-				gpuMemoryUsageMetric.With(prometheus.Labels{"gpu_id": index, "job_id": jobID}).Set(usedMemory * 1024 * 1024) // Convert MiB to bytes
-				gpuUtilizationMetric.With(prometheus.Labels{"gpu_id": index, "job_id": jobID}).Set(0)
+				if _, exists := jobIDs[jobID]; exists {
+					gpuMemoryUsageMetric.With(prometheus.Labels{"gpu_id": index, "job_id": jobID}).Set(usedMemory * 1024 * 1024) // Convert MiB to bytes
+					gpuUtilizationMetric.With(prometheus.Labels{"gpu_id": index, "job_id": jobID}).Set(0)
+				}
 			}
 		}
 	}
 }
 
-func collectIOMetrics() {
+func collectIOMetrics() map[string]struct{} {
 	// Base path to Slurm
 	basePath := "/sys/fs/cgroup/cpu/slurm"
 
@@ -185,7 +187,7 @@ func collectIOMetrics() {
 	baseDir, err := os.Open(basePath)
 	if err != nil {
 		fmt.Printf("Failed to open the base directory: %s\n", err)
-		return
+		return nil
 	}
 	defer baseDir.Close()
 
@@ -193,8 +195,10 @@ func collectIOMetrics() {
 	entries, err := baseDir.Readdirnames(-1)
 	if err != nil {
 		fmt.Printf("Failed to read the entries in the directory: %s\n", err)
-		return
+		return nil
 	}
+
+	jobIDs := make(map[string]struct{})
 
 	// Iterate over each entry looking for uid directories
 	for _, entry := range entries {
@@ -205,7 +209,7 @@ func collectIOMetrics() {
 			// Open the uid directory
 			uidDir, err := os.Open(uidPath)
 			if err != nil {
-				fmt.Printf("Failed to open UID directory %s: %s\n", uidPath, err)
+				fmt.Printf(" ailed to open UID directory %s: %s\n", uidPath, err)
 				continue // If unable to open, skip to next uid directory
 			}
 
@@ -225,21 +229,21 @@ func collectIOMetrics() {
 					cgroupProcsPath := filepath.Join(jobPath, "cgroup.procs")
 
 					// Check if cgroup.procs file exists
-					if _, err := os.Stat(cgroupProcsPath); os.IsNotExist(err)) {
-						fmt.Printf("No cgroup.procs file for job %s (UID %s), skipping\n", jobEntry, entry)
+					if _, err := os.Stat(cgroupProcsPath); os.IsNotExist(err) {
+						fmt.Printf("WARN: No cgroup.procs file for job %s (UID %s), skipping\n", jobEntry, entry)
 						continue
 					}
 
 					// Read the PIDs from the cgroup.procs file
 					pids, err := os.ReadFile(cgroupProcsPath)
 					if err != nil {
-						fmt.Printf("Failed to read cgroup.procs for job %s (UID %s): %v\n", jobEntry, entry, err)
+						fmt.Printf("WARN: Failed to read cgroup.procs for job %s (UID %s): %v\n", jobEntry, entry, err)
 						continue
 					}
 
 					// If no PIDs, skip this job
 					if len(strings.Fields(string(pids))) == 0 {
-						fmt.Printf("No PIDs found in cgroup.procs for job %s (UID %s), skipping\n", jobEntry, entry)
+						fmt.Printf("WARN: No PIDs found in cgroup.procs for job %s (UID %s), skipping\n", jobEntry, entry)
 						continue
 					}
 
@@ -248,11 +252,14 @@ func collectIOMetrics() {
 						ioFilePath := fmt.Sprintf("/proc/%s/io", pid)
 						content, err := os.ReadFile(ioFilePath)
 						if err != nil {
-							fmt.Printf("Error reading IO file for PID %s: %v\n", pid, err)
+							fmt.Printf("WARN: Error reading IO file for PID %s: %v\n", pid, err)
 							ioReadBytesMetric.With(prometheus.Labels{"pid": pid, "job_id": strings.TrimPrefix(jobEntry, "job_")}).Set(0)
 							ioWriteBytesMetric.With(prometheus.Labels{"pid": pid, "job_id": strings.TrimPrefix(jobEntry, "job_")}).Set(0)
 							continue
 						}
+
+						jobID := strings.TrimPrefix(jobEntry, "job_")
+						jobIDs[jobID] = struct{}{}
 
 						ioReadSet := false
 						ioWriteSet := false
@@ -267,26 +274,27 @@ func collectIOMetrics() {
 								}
 
 								if key == "read_bytes" {
-									ioReadBytesMetric.With(prometheus.Labels{"pid": pid, "job_id": strings.TrimPrefix(jobEntry, "job_")}).Set(value)
+									ioReadBytesMetric.With(prometheus.Labels{"pid": pid, "job_id": jobID}).Set(value)
 									ioReadSet = true
 								} else if key == "write_bytes" {
-									ioWriteBytesMetric.With(prometheus.Labels{"pid": pid, "job_id": strings.TrimPrefix(jobEntry, "job_")}).Set(value)
+									ioWriteBytesMetric.With(prometheus.Labels{"pid": pid, "job_id": jobID}).Set(value)
 									ioWriteSet = true
 								}
 							}
 						}
 
 						if !ioReadSet {
-							ioReadBytesMetric.With(prometheus.Labels{"pid": pid, "job_id": strings.TrimPrefix(jobEntry, "job_")}).Set(0)
+							ioReadBytesMetric.With(prometheus.Labels{"pid": pid, "job_id": jobID}).Set(0)
 						}
 						if !ioWriteSet {
-							ioWriteBytesMetric.With(prometheus.Labels{"pid": pid, "job_id": strings.TrimPrefix(jobEntry, "job_")}).Set(0)
+							ioWriteBytesMetric.With(prometheus.Labels{"pid": pid, "job_id": jobID}).Set(0)
 						}
 					}
 				}
 			}
 		}
 	}
+	return jobIDs
 }
 
 func main() {
@@ -294,8 +302,10 @@ func main() {
 		ticker := time.NewTicker(2 * time.Second)
 		defer ticker.Stop()
 		for range ticker.C {
-			collectGPUMetrics()
-			collectIOMetrics()
+			jobIDs := collectIOMetrics()
+			if jobIDs != nil {
+				collectGPUMetrics(jobIDs)
+			}
 		}
 	}()
 
