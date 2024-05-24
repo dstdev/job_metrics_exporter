@@ -150,6 +150,15 @@ func collectGPUMetrics(jobIDs map[string]struct{}) {
 		}
 	}
 
+	// Collect metrics for each job ID in jobIDs
+	for jobID := range jobIDs {
+		// Initialize GPU metrics to zero
+		for index := range gpuUUIDToIndex {
+			gpuUtilizationMetric.With(prometheus.Labels{"gpu_id": index, "job_id": jobID}).Set(0)
+			gpuMemoryUsageMetric.With(prometheus.Labels{"gpu_id": index, "job_id": jobID}).Set(0)
+		}
+	}
+
 	// Process computeAppsOutput and update Prometheus metrics
 	computeAppsLines := strings.Split(strings.TrimSpace(string(computeAppsOutput)), "\n")
 	for _, line := range computeAppsLines {
@@ -172,7 +181,7 @@ func collectGPUMetrics(jobIDs map[string]struct{}) {
 
 				if _, exists := jobIDs[jobID]; exists {
 					gpuMemoryUsageMetric.With(prometheus.Labels{"gpu_id": index, "job_id": jobID}).Set(usedMemory * 1024 * 1024) // Convert MiB to bytes
-					gpuUtilizationMetric.With(prometheus.Labels{"gpu_id": index, "job_id": jobID}).Set(0)
+					gpuUtilizationMetric.With(prometheus.Labels{"gpu_id": index, "job_id": jobID}).Set(0)                           // Assuming GPU utilization percentage is 0 if no data available
 				}
 			}
 		}
@@ -180,6 +189,8 @@ func collectGPUMetrics(jobIDs map[string]struct{}) {
 }
 
 func collectIOMetrics() map[string]struct{} {
+	jobIDs := make(map[string]struct{})
+
 	// Base path to Slurm
 	basePath := "/sys/fs/cgroup/cpu/slurm"
 
@@ -198,8 +209,6 @@ func collectIOMetrics() map[string]struct{} {
 		return nil
 	}
 
-	jobIDs := make(map[string]struct{})
-
 	// Iterate over each entry looking for uid directories
 	for _, entry := range entries {
 		if strings.HasPrefix(entry, "uid_") {
@@ -209,7 +218,7 @@ func collectIOMetrics() map[string]struct{} {
 			// Open the uid directory
 			uidDir, err := os.Open(uidPath)
 			if err != nil {
-				fmt.Printf(" ailed to open UID directory %s: %s\n", uidPath, err)
+				fmt.Printf("Failed to open UID directory %s: %s\n", uidPath, err)
 				continue // If unable to open, skip to next uid directory
 			}
 
@@ -224,6 +233,9 @@ func collectIOMetrics() map[string]struct{} {
 			// Iterate over job entries
 			for _, jobEntry := range jobEntries {
 				if strings.HasPrefix(jobEntry, "job_") {
+					jobID := strings.TrimPrefix(jobEntry, "job_")
+					jobIDs[jobID] = struct{}{}
+
 					// Construct path for this job directory
 					jobPath := fmt.Sprintf("%s/%s", uidPath, jobEntry)
 					cgroupProcsPath := filepath.Join(jobPath, "cgroup.procs")
@@ -252,14 +264,11 @@ func collectIOMetrics() map[string]struct{} {
 						ioFilePath := fmt.Sprintf("/proc/%s/io", pid)
 						content, err := os.ReadFile(ioFilePath)
 						if err != nil {
-							fmt.Printf("WARN: Error reading IO file for PID %s: %v\n", pid, err)
-							ioReadBytesMetric.With(prometheus.Labels{"pid": pid, "job_id": strings.TrimPrefix(jobEntry, "job_")}).Set(0)
-							ioWriteBytesMetric.With(prometheus.Labels{"pid": pid, "job_id": strings.TrimPrefix(jobEntry, "job_")}).Set(0)
+							fmt.Printf("Error reading IO file for PID %s: %v\n", pid, err)
+							ioReadBytesMetric.With(prometheus.Labels{"pid": pid, "job_id": jobID}).Set(0)
+							ioWriteBytesMetric.With(prometheus.Labels{"pid": pid, "job_id": jobID}).Set(0)
 							continue
 						}
-
-						jobID := strings.TrimPrefix(jobEntry, "job_")
-						jobIDs[jobID] = struct{}{}
 
 						ioReadSet := false
 						ioWriteSet := false
@@ -269,7 +278,7 @@ func collectIOMetrics() map[string]struct{} {
 								key := strings.TrimSpace(parts[0])
 								value, err := strconv.ParseFloat(strings.TrimSpace(parts[1]), 64)
 								if err != nil {
-									fmt.Printf("Error parsing IO metric for PID %s: %v\n", pid, err)
+									fmt.Printf("WARN: Error parsing IO metric for PID %s: %v\n", pid, err)
 									continue
 								}
 
@@ -294,6 +303,7 @@ func collectIOMetrics() map[string]struct{} {
 			}
 		}
 	}
+
 	return jobIDs
 }
 
