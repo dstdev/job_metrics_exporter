@@ -45,62 +45,49 @@ func init() {
 	prometheus.MustRegister(ioWriteBytesMetric)
 
 	// Initialize metrics to zero for tracking 0% utilization
-	gpuMemoryUsageMetric.WithLabelValues("none", "none").Set(0)
-	gpuUtilizationMetric.WithLabelValues("none", "none").Set(0)
-	ioReadBytesMetric.WithLabelValues("none", "none").Set(0)
-	ioWriteBytesMetric.WithLabelValues("none", "none").Set(0)
+	gpuMemoryUsageMetric.WithLabelValues("N/A", "none").Set(0)
+	gpuUtilizationMetric.WithLabelValues("N/A", "none").Set(0)
+	ioReadBytesMetric.WithLabelValues("N/A", "none").Set(0)
+	ioWriteBytesMetric.WithLabelValues("N/A", "none").Set(0)
 }
 
 // getJobIDFromPID finds the job ID for a given PID from the Slurm cgroup directory
 func getJobIDFromPID(pid string) (string, error) {
-	// Base path to Slurm
 	basePath := "/sys/fs/cgroup/cpu/slurm"
 
-	// Open the base path directory
 	baseDir, err := os.Open(basePath)
 	if err != nil {
 		return "", fmt.Errorf("failed to open the base directory: %v", err)
 	}
 	defer baseDir.Close()
 
-	// Read entries
 	entries, err := baseDir.Readdirnames(-1)
 	if err != nil {
 		return "", fmt.Errorf("failed to read the entries in the directory: %v", err)
 	}
 
-	// Iterate over each entry looking for uid directories
 	for _, entry := range entries {
 		if strings.HasPrefix(entry, "uid_") {
-			// Construct path for this uid directory
 			uidPath := fmt.Sprintf("%s/%s", basePath, entry)
-
-			// Open the uid directory
 			uidDir, err := os.Open(uidPath)
 			if err != nil {
-				continue // If unable to open, skip to next uid directory
+				continue
 			}
 
-			// Read job entries in the uid directory
 			jobEntries, err := uidDir.Readdirnames(-1)
 			uidDir.Close()
 			if err != nil {
-				continue // If unable to read, skip to next uid directory
+				continue
 			}
 
-			// Iterate over job entries
 			for _, jobEntry := range jobEntries {
 				if strings.HasPrefix(jobEntry, "job_") {
-					// Construct path for this job directory
 					jobPath := fmt.Sprintf("%s/%s/cgroup.procs", uidPath, jobEntry)
-
-					// Attempt to open the cgroup.procs file within this job directory
 					file, err := os.Open(jobPath)
 					if err != nil {
-						continue // If unable to open, skip to next job directory
+						continue
 					}
 
-					// Scan through the cgroup.procs file
 					scanner := bufio.NewScanner(file)
 					for scanner.Scan() {
 						line := scanner.Text()
@@ -123,7 +110,6 @@ func getJobIDFromPID(pid string) (string, error) {
 }
 
 func collectGPUMetrics(jobIDs map[string]struct{}) {
-	// Run nvidia-smi to get GPU usage and application memory usage
 	gpuInfoCmd := exec.Command("bash", "-c", "nvidia-smi --query-gpu=gpu_uuid,index,name,utilization.gpu --format=csv,noheader")
 	gpuInfoOutput, err := gpuInfoCmd.Output()
 	if err != nil {
@@ -138,7 +124,6 @@ func collectGPUMetrics(jobIDs map[string]struct{}) {
 		return
 	}
 
-	// Process gpuInfoOutput to map UUID to GPU ID
 	gpuInfoLines := strings.Split(strings.TrimSpace(string(gpuInfoOutput)), "\n")
 	gpuUUIDToIndex := make(map[string]string)
 	for _, line := range gpuInfoLines {
@@ -150,16 +135,13 @@ func collectGPUMetrics(jobIDs map[string]struct{}) {
 		}
 	}
 
-	// Collect metrics for each job ID in jobIDs
 	for jobID := range jobIDs {
-		// Initialize GPU metrics to zero
 		for index := range gpuUUIDToIndex {
 			gpuUtilizationMetric.With(prometheus.Labels{"gpu_id": index, "job_id": jobID}).Set(0)
 			gpuMemoryUsageMetric.With(prometheus.Labels{"gpu_id": index, "job_id": jobID}).Set(0)
 		}
 	}
 
-	// Process computeAppsOutput and update Prometheus metrics
 	computeAppsLines := strings.Split(strings.TrimSpace(string(computeAppsOutput)), "\n")
 	for _, line := range computeAppsLines {
 		parts := strings.Split(line, ", ")
@@ -180,8 +162,8 @@ func collectGPUMetrics(jobIDs map[string]struct{}) {
 				}
 
 				if _, exists := jobIDs[jobID]; exists {
-					gpuMemoryUsageMetric.With(prometheus.Labels{"gpu_id": index, "job_id": jobID}).Set(usedMemory * 1024 * 1024) // Convert MiB to bytes
-					gpuUtilizationMetric.With(prometheus.Labels{"gpu_id": index, "job_id": jobID}).Set(0)                           // Assuming GPU utilization percentage is 0 if no data available
+					gpuMemoryUsageMetric.With(prometheus.Labels{"gpu_id": index, "job_id": jobID}).Set(usedMemory * 1024 * 1024)
+					gpuUtilizationMetric.With(prometheus.Labels{"gpu_id": index, "job_id": jobID}).Set(0)
 				}
 			}
 		}
@@ -191,10 +173,8 @@ func collectGPUMetrics(jobIDs map[string]struct{}) {
 func collectIOMetrics() map[string]struct{} {
 	jobIDs := make(map[string]struct{})
 
-	// Base path to Slurm
 	basePath := "/sys/fs/cgroup/cpu/slurm"
 
-	// Open the base path directory
 	baseDir, err := os.Open(basePath)
 	if err != nil {
 		fmt.Printf("Failed to open the base directory: %s\n", err)
@@ -202,64 +182,53 @@ func collectIOMetrics() map[string]struct{} {
 	}
 	defer baseDir.Close()
 
-	// Read entries
 	entries, err := baseDir.Readdirnames(-1)
 	if err != nil {
 		fmt.Printf("Failed to read the entries in the directory: %s\n", err)
 		return nil
 	}
 
-	// Iterate over each entry looking for uid directories
 	for _, entry := range entries {
 		if strings.HasPrefix(entry, "uid_") {
-			// Construct path for this uid directory
 			uidPath := fmt.Sprintf("%s/%s", basePath, entry)
 
-			// Open the uid directory
 			uidDir, err := os.Open(uidPath)
 			if err != nil {
 				fmt.Printf("Failed to open UID directory %s: %s\n", uidPath, err)
-				continue // If unable to open, skip to next uid directory
+				continue
 			}
 
-			// Read job entries in the uid directory
 			jobEntries, err := uidDir.Readdirnames(-1)
 			uidDir.Close()
 			if err != nil {
 				fmt.Printf("Failed to read job entries in UID directory %s: %s\n", uidPath, err)
-				continue // If unable to read, skip to next uid directory
+				continue
 			}
 
-			// Iterate over job entries
 			for _, jobEntry := range jobEntries {
 				if strings.HasPrefix(jobEntry, "job_") {
 					jobID := strings.TrimPrefix(jobEntry, "job_")
 					jobIDs[jobID] = struct{}{}
 
-					// Construct path for this job directory
 					jobPath := fmt.Sprintf("%s/%s", uidPath, jobEntry)
 					cgroupProcsPath := filepath.Join(jobPath, "cgroup.procs")
 
-					// Check if cgroup.procs file exists
 					if _, err := os.Stat(cgroupProcsPath); os.IsNotExist(err) {
 						fmt.Printf("WARN: No cgroup.procs file for job %s (UID %s), skipping\n", jobEntry, entry)
 						continue
 					}
 
-					// Read the PIDs from the cgroup.procs file
 					pids, err := os.ReadFile(cgroupProcsPath)
 					if err != nil {
 						fmt.Printf("WARN: Failed to read cgroup.procs for job %s (UID %s): %v\n", jobEntry, entry, err)
 						continue
 					}
 
-					// If no PIDs, skip this job
 					if len(strings.Fields(string(pids))) == 0 {
 						fmt.Printf("WARN: No PIDs found in cgroup.procs for job %s (UID %s), skipping\n", jobEntry, entry)
 						continue
 					}
 
-					// Collect I/O metrics for each PID
 					for _, pid := range strings.Fields(string(pids)) {
 						ioFilePath := fmt.Sprintf("/proc/%s/io", pid)
 						content, err := os.ReadFile(ioFilePath)
@@ -321,6 +290,5 @@ func main() {
 
 	http.Handle("/metrics", promhttp.Handler())
 	fmt.Println("Serving metrics at /metrics")
-	// Exposes metrics via http://localhost:9060/metrics
 	http.ListenAndServe(":9060", nil)
 }
