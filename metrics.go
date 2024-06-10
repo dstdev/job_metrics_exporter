@@ -43,15 +43,8 @@ func init() {
 	prometheus.MustRegister(gpuMemoryUsageMetric)
 	prometheus.MustRegister(ioReadBytesMetric)
 	prometheus.MustRegister(ioWriteBytesMetric)
-
-	// Initialize metrics to zero for tracking 0% utilization
-	gpuMemoryUsageMetric.WithLabelValues("N/A", "none").Set(0)
-	gpuUtilizationMetric.WithLabelValues("N/A", "none").Set(0)
-	ioReadBytesMetric.WithLabelValues("N/A", "none").Set(0)
-	ioWriteBytesMetric.WithLabelValues("N/A", "none").Set(0)
 }
 
-// getJobIDFromPID finds the job ID for a given PID from the Slurm cgroup directory
 func getJobIDFromPID(pid string) (string, error) {
 	basePath := "/sys/fs/cgroup/cpu/slurm"
 
