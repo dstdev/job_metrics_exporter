@@ -129,7 +129,7 @@ func collectGPUMetrics(jobIDs map[string]struct{}) {
 	}
 
 	for jobID := range jobIDs {
-		for index := range gpuUUIDToIndex {
+		for _, index := range gpuUUIDToIndex {
 			gpuUtilizationMetric.With(prometheus.Labels{"gpu_id": index, "job_id": jobID}).Set(0)
 			gpuMemoryUsageMetric.With(prometheus.Labels{"gpu_id": index, "job_id": jobID}).Set(0)
 		}
