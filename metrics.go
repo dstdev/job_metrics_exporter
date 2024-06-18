@@ -129,12 +129,10 @@ func collectGPUMetrics(jobIDs map[string]struct{}) {
 		}
 	}
 
-	// Initialize metrics to zero for all job and GPU index combinations
+	// Initialize GPU metrics for all job IDs with "N/A"
 	for jobID := range jobIDs {
-		for _, index := range gpuUUIDToIndex {
-			gpuUtilizationMetric.With(prometheus.Labels{"gpu_id": index, "job_id": jobID}).Set(0)
-			gpuMemoryUsageMetric.With(prometheus.Labels{"gpu_id": index, "job_id": jobID}).Set(0)
-		}
+		gpuUtilizationMetric.With(prometheus.Labels{"gpu_id": "N/A", "job_id": jobID}).Set(0)
+		gpuMemoryUsageMetric.With(prometheus.Labels{"gpu_id": "N/A", "job_id": jobID}).Set(0)
 	}
 
 	computeAppsLines := strings.Split(strings.TrimSpace(string(computeAppsOutput)), "\n")
@@ -158,7 +156,6 @@ func collectGPUMetrics(jobIDs map[string]struct{}) {
 
 				if _, exists := jobIDs[jobID]; exists {
 					gpuMemoryUsageMetric.With(prometheus.Labels{"gpu_id": index, "job_id": jobID}).Set(usedMemory * 1024 * 1024)
-					// Update actual GPU utilization metric
 					gpuUtilizationMetric.With(prometheus.Labels{"gpu_id": index, "job_id": jobID}).Set(0) // Replace 0 with actual utilization value if available
 				}
 			}
