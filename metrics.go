@@ -128,11 +128,18 @@ func collectGPUMetrics(jobIDs map[string]struct{}) {
 		}
 	}
 
+	// Initialize metrics to zero for all job and GPU index combinations
 	for jobID := range jobIDs {
 		for _, index := range gpuUUIDToIndex {
 			gpuUtilizationMetric.With(prometheus.Labels{"gpu_id": index, "job_id": jobID}).Set(0)
 			gpuMemoryUsageMetric.With(prometheus.Labels{"gpu_id": index, "job_id": jobID}).Set(0)
 		}
+	}
+
+	// Initialize metrics to "N/A" for all GPUs for jobs not found
+	for index := range gpuUUIDToIndex {
+		gpuUtilizationMetric.With(prometheus.Labels{"gpu_id": index, "job_id": "N/A"}).Set(0)
+		gpuMemoryUsageMetric.With(prometheus.Labels{"gpu_id": index, "job_id": "N/A"}).Set(0)
 	}
 
 	computeAppsLines := strings.Split(strings.TrimSpace(string(computeAppsOutput)), "\n")
@@ -151,7 +158,7 @@ func collectGPUMetrics(jobIDs map[string]struct{}) {
 				jobID, err := getJobIDFromPID(pid)
 				if err != nil {
 					fmt.Printf("WARN: Error fetching job ID for PID %s: %v\n", pid, err)
-					continue
+					jobID = "N/A"
 				}
 
 				if _, exists := jobIDs[jobID]; exists {
