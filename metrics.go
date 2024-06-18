@@ -45,6 +45,7 @@ func init() {
 	prometheus.MustRegister(ioWriteBytesMetric)
 }
 
+// getJobIDFromPID finds the job ID for a given PID from the Slurm cgroup directory
 func getJobIDFromPID(pid string) (string, error) {
 	basePath := "/sys/fs/cgroup/cpu/slurm"
 
@@ -136,12 +137,6 @@ func collectGPUMetrics(jobIDs map[string]struct{}) {
 		}
 	}
 
-	// Initialize metrics to "N/A" for all GPUs for jobs not found
-	for index := range gpuUUIDToIndex {
-		gpuUtilizationMetric.With(prometheus.Labels{"gpu_id": index, "job_id": "N/A"}).Set(0)
-		gpuMemoryUsageMetric.With(prometheus.Labels{"gpu_id": index, "job_id": "N/A"}).Set(0)
-	}
-
 	computeAppsLines := strings.Split(strings.TrimSpace(string(computeAppsOutput)), "\n")
 	for _, line := range computeAppsLines {
 		parts := strings.Split(line, ", ")
@@ -158,12 +153,13 @@ func collectGPUMetrics(jobIDs map[string]struct{}) {
 				jobID, err := getJobIDFromPID(pid)
 				if err != nil {
 					fmt.Printf("WARN: Error fetching job ID for PID %s: %v\n", pid, err)
-					jobID = "N/A"
+					continue
 				}
 
 				if _, exists := jobIDs[jobID]; exists {
 					gpuMemoryUsageMetric.With(prometheus.Labels{"gpu_id": index, "job_id": jobID}).Set(usedMemory * 1024 * 1024)
-					gpuUtilizationMetric.With(prometheus.Labels{"gpu_id": index, "job_id": jobID}).Set(0)
+					// Update actual GPU utilization metric
+					gpuUtilizationMetric.With(prometheus.Labels{"gpu_id": index, "job_id": jobID}).Set(0) // Replace 0 with actual utilization value if available
 				}
 			}
 		}
